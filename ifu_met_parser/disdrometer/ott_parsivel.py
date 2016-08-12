@@ -22,7 +22,8 @@ def read_parsivel_csv_files(fn,
                             variables_index_dict,
                             show_warnings=True):
     data_dict = {'time': [],
-                 'N': []}
+                 'N': [],
+                 'N_vec': []}
     for variable in variables_index_dict.keys():
         data_dict[variable] = []
 
@@ -42,9 +43,10 @@ def read_parsivel_csv_files(fn,
                     date_str = row[0] + ' ' + row[1]
                     data_dict['time'].append(datetime.strptime(date_str, '%d.%m.%Y %H:%M:%S'))
                     for variable in variables_index_dict.keys():
-                        data_dict[variable].append(row[variables_index_dict[variable]])
+                        data_dict[variable].append(float(row[variables_index_dict[variable]]))
                     if row[spectrum_i_start] == '<SPECTRUM>ZERO</SPECTRUM>':
                         N_matrix = np.zeros((32, 32), dtype=int)
+                        N_array = np.zeros(32*32, dtype=int)
                     else:
                         # Convert the (mostly) empty strings of the spectrum
                         # to a list of integers
@@ -57,7 +59,11 @@ def read_parsivel_csv_files(fn,
                             else:
                                 N_list.append(int(value))
                         N_matrix = np.array(N_list).reshape((32, 32))
+
+                        N_array = np.array(N_list)
+
                     data_dict['N'].append(N_matrix)
+                    data_dict['N_vec'].append(N_array)
                 else:
                     if show_warnings:
                         print('Warning: Skipping row. Length of row should be %d or %d, but is %d instead' % (
@@ -68,16 +74,20 @@ def read_parsivel_csv_files(fn,
 
     ds = xr.Dataset(coords={'time': data_dict['time'],
                             'D': ('D', D),
-                            'v': ('v', v)},
+                            'v': ('v', v),
+                            'foo': ('foo', np.arange(32*32))},
                     data_vars={'N': (['time', 'v', 'D'], data_dict['N']),
                                'dD': ('D', dD),
-                               'dv': ('v', dv)})
+                               'dv': ('v', dv),
+                               'N_vec': (['time', 'foo'], data_dict['N_vec'])})
+    for variable in variables_index_dict.keys():
+        ds[variable] = ('time', data_dict[variable])
 
     return ds
 
 
 def read_ifu_tereno_parsivel_csv_files(fn, show_warnings=True):
-    variables_index_dict = {'Z': 4,
+    variables_index_dict = {'Z': 7,
                             'R': 2}
     return read_parsivel_csv_files(fn,
                                    spectrum_i_start=16,
@@ -86,14 +96,14 @@ def read_ifu_tereno_parsivel_csv_files(fn, show_warnings=True):
                                    show_warnings=show_warnings)
 
 
-def read_dlr_scalex_parsivel_csv_files(fn):
+def read_dlr_scalex_parsivel_csv_files(fn, show_warnings=True):
     variables_index_dict = {'Z': 4,
                             'R': 2}
     return read_parsivel_csv_files(fn,
-                                   spectrum_i_start=10,
+                                   spectrum_i_start=9,
                                    spectrum_i_stop=-1,
                                    variables_index_dict=variables_index_dict,
-                                   show_warnings=True)
+                                   show_warnings=show_warnings)
 
 
 # Classification according to volume-equivalent diameter
