@@ -15,7 +15,9 @@ import tarfile
 import tempfile
 from datetime import datetime, timedelta
 
+import numpy as np
 import pandas as pd
+import xarray as xr
 import wradlib as wrl
 
 
@@ -119,26 +121,69 @@ def download_files_from_ftp(t_start, t_stop, local_data_dir, redownload_existing
     return fn_downloaded_list
 
 
-def read_in_one_bin_file(fn):
-    data, metadata = wrl.io.read_RADOLAN_composite(fn)
+def read_in_one_bin_file(f):
+    data, metadata = wrl.io.read_RADOLAN_composite(f)
     return data, metadata
 
-def read_in_one_bin_file_from_file_handle(fh):
-    with tempfile.NamedTemporaryFile() as tmpfile:
-        temp_file_name = tmpfile.name
-        f
 
-def read_in_files(fn_list):
+def read_in_files(fn_list, print_file_names=False):
     data_list = []
     metadata_list = []
     for fn in fn_list:
         if 'tar.gz' in fn:
+            if print_file_names:
+                print(' Untaring %s' % fn)
             # Unzip and untar RADOLAN-bin files and read them in
-            tar = tarfile.open(fn, "r:gz")
-            for member in tar.getmembers():
-                f = tar.extractfile(member)
-                if f is not None:
-                    content = f.read()
+            with tarfile.open(fn, "r:gz") as tar:
+                for member in tar.getmembers():
+                    f = tar.extractfile(member)
+                    if f is not None:
+                        if print_file_names:
+                            print('  Reading in %s' % f.name)
+                        data, metadata = read_in_one_bin_file(f)
+                        data = clean_radolan_data(data, metadata)
+                        data_list.append(data)
+                        metadata_list.append(metadata)
+        else:
+            if print_file_names:
+                print(' Reading in %s' % fn)
+            data, metadata = read_in_one_bin_file(fn)
+            data = clean_radolan_data(data, metadata)
+            data_list.append(data)
+            metadata_list.append(metadata)
+
+    ds = radolan_to_xarray_dataset(data_list, metadata_list)
+
+    return ds
+
+
+def clean_radolan_data(data, metadata):
+    # mask invalid values
+    sec = metadata['secondary']
+    data.flat[sec] = -9999
+    data[data == -9999] = np.nan
+    return data
+
+
+def radolan_to_xarray_dataset(data, metadata):
+    if type(data) != list:
+        data = [data,]
+    if type(metadata) != list:
+        metadata = [metadata,]
+
+    radolan_lat_lon_grids = wrl.georef.get_radolan_grid(900,900, wgs84=True)
+    radolan_lons = radolan_lat_lon_grids[:,:,0]
+    radolan_lats = radolan_lat_lon_grids[:,:,1]
+
+    ds = xr.Dataset({'precipitation': (['time', 'x', 'y'], data)},
+                    coords={'lon': (['x', 'y'], radolan_lons),
+                            'lat': (['x', 'y'], radolan_lats),
+                            'time': [metadata_i['datetime'] for metadata_i in metadata],
+                            'reference_time': pd.Timestamp('1970-01-01')})
+
+    return ds
+
+
 
 
 def _generate_temp_filenames_from_tar_gz_file(fn):
