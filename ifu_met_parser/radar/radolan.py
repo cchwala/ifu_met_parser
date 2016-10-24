@@ -12,7 +12,6 @@
 import ftplib
 import os
 import tarfile
-import tempfile
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -185,14 +184,3 @@ def radolan_to_xarray_dataset(data, metadata):
                             'reference_time': pd.Timestamp('1970-01-01')})
 
     return ds
-
-
-
-
-def _generate_temp_filenames_from_tar_gz_file(fn):
-    # Unzip and untar RADOLAN-bin files and read them in
-        tar = tarfile.open(fn, "r:gz")
-        for member in tar.getmembers():
-            f = tar.extractfile(member)
-            if f is not None:
-                content = f.read()
