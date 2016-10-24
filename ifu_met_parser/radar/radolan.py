@@ -105,13 +105,11 @@ def download_files_from_ftp(t_start, t_stop, local_data_dir, redownload_existing
 
         if fn not in fn_already_in_local_dir_list:
             print('Downloading %s' % fn_full_path)
-            with open(fn_local_full_path, 'wb') as fh:
-                ftp_session.retrbinary('RETR %s' % fn_full_path, fh.write)
+            _download_one_file(ftp_session, fn_full_path, fn_local_full_path)
         else:
             if redownload_existing_files:
                 print('Redownloading %s' % fn_full_path)
-                with open(fn_local_full_path, 'wb') as fh:
-                    ftp_session.retrbinary('RETR %s' % fn_full_path, fh.write)
+                _download_one_file(ftp_session, fn_full_path, fn_local_full_path)
             else:
                 print('Skipping %s' % fn_full_path)
         fn_downloaded_list.append(os.path.join(local_data_dir,fn))
@@ -119,6 +117,11 @@ def download_files_from_ftp(t_start, t_stop, local_data_dir, redownload_existing
     ftp_session.close()
 
     return fn_downloaded_list
+
+
+def _download_one_file(ftp_session, fn_remote, fn_local):
+    with open(fn_local, 'wb') as fh:
+        ftp_session.retrbinary('RETR %s' % fn_remote, fh.write)
 
 
 def read_in_one_bin_file(f):
