@@ -12,6 +12,7 @@
 import ftplib
 import os
 import tarfile
+import gzip
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -128,24 +129,51 @@ def read_in_one_bin_file(f):
     return data, metadata
 
 
+def read_in_one_tar_gz_file(fn, print_file_names=False):
+    data_list = []
+    metadata_list = []
+    # Unzip and untar RADOLAN-bin files and read them in
+    with tarfile.open(fn, "r:gz") as tar:
+        for member in tar.getmembers():
+            f = tar.extractfile(member)
+            if f is not None:
+                if print_file_names:
+                    print('  Reading in %s' % f.name)
+            # Unfortunately, the old "historic" files till somewhere
+            # in 2014 contain gzipped "bin" files. And since the
+            # extraction from the tar-archive returns file handles,
+            # assuming that they belong to plain files, the handles
+            # have to be converted into GzipFile-handles.
+            # Note, that the wradlib parsing function could handle zipped
+            # and plain files, but only when file names are provided
+            if '.gz' in f.name:
+                with gzip.GzipFile(fileobj=f, mode='rb') as f:
+                    data, metadata = read_in_one_bin_file(f)
+            else:
+                data, metadata = read_in_one_bin_file(f)
+            data = clean_radolan_data(data, metadata)
+            data_list.append(data)
+            metadata_list.append(metadata)
+    return data_list, metadata_list
+
+
 def read_in_files(fn_list, print_file_names=False):
     data_list = []
     metadata_list = []
     for fn in fn_list:
+        # Distinguish between the two different file types,
+        # the "historic" files, which are a tar.gz-archive
+        # of the "bin" files and the "recent" files which are
+        # also "bin" files.
         if 'tar.gz' in fn:
             if print_file_names:
                 print(' Untaring %s' % fn)
-            # Unzip and untar RADOLAN-bin files and read them in
-            with tarfile.open(fn, "r:gz") as tar:
-                for member in tar.getmembers():
-                    f = tar.extractfile(member)
-                    if f is not None:
-                        if print_file_names:
-                            print('  Reading in %s' % f.name)
-                        data, metadata = read_in_one_bin_file(f)
-                        data = clean_radolan_data(data, metadata)
-                        data_list.append(data)
-                        metadata_list.append(metadata)
+            (temp_data_list,
+             temp_metadata_list) = read_in_one_tar_gz_file(
+                                      fn,
+                                      print_file_names=print_file_names)
+            data_list += temp_data_list
+            metadata_list += temp_metadata_list
         else:
             if print_file_names:
                 print(' Reading in %s' % fn)
@@ -169,18 +197,49 @@ def clean_radolan_data(data, metadata):
 
 def radolan_to_xarray_dataset(data, metadata):
     if type(data) != list:
-        data = [data,]
+        data = [data, ]
     if type(metadata) != list:
-        metadata = [metadata,]
+        metadata = [metadata, ]
 
     radolan_lat_lon_grids = wrl.georef.get_radolan_grid(900,900, wgs84=True)
     radolan_lons = radolan_lat_lon_grids[:,:,0]
     radolan_lats = radolan_lat_lon_grids[:,:,1]
 
-    ds = xr.Dataset({'precipitation': (['time', 'x', 'y'], data)},
+    # Sort data according to datetime
+    datetime_array = np.array([metadata_i['datetime'] for metadata_i in metadata])
+    sorting_index = datetime_array.argsort()
+    datetime_array_sorted = datetime_array[sorting_index]
+    data_array = np.array(data)
+    data_array_sorted = data_array[sorting_index, :, :]
+
+    ds = xr.Dataset({'precipitation': (['time', 'x', 'y'], data_array_sorted)},
                     coords={'lon': (['x', 'y'], radolan_lons),
                             'lat': (['x', 'y'], radolan_lats),
-                            'time': [metadata_i['datetime'] for metadata_i in metadata],
+                            'time': datetime_array_sorted,
                             'reference_time': pd.Timestamp('1970-01-01')})
+    #sorted_index = ds.time.argsort()
+    #ds.time = ds.time[sorted_index]
+    #ds.precipitation[:,:,:] = ds.precipitation[sorted_index, :, :]
 
     return ds
+
+
+def append_to_yearly_netcdf(data_dir, ds, overwrite_all=False):
+    for year, ds_yearly in ds.groupby('time.year'):
+        fn = datetime.strftime(pd.to_datetime(ds_yearly.time.values[0]),
+                               format=filename_timestamp_format['netcdf'])
+        fn_full_path = os.path.join(data_dir, fn)
+        if not os.path.isfile(fn_full_path) or overwrite_all:
+            netcdf_mode = 'w'
+            print('Writing to new file %s' % fn_full_path)
+        else:
+            netcdf_mode = 'a'
+            print('Appending to %s' % fn_full_path)
+        ds_yearly.to_netcdf(fn_full_path,
+                            mode=netcdf_mode,
+                            encoding={'precipitation': {'dtype': 'float32',
+                                                        'zlib': True,
+                                                        'complevel': 1}})
+
+
+
