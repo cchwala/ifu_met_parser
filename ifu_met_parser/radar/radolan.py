@@ -143,21 +143,21 @@ def read_in_one_tar_gz_file(fn, print_file_names=False):
             if f is not None:
                 if print_file_names:
                     print('  Reading in %s' % f.name)
-            # Unfortunately, the old "historic" files till somewhere
-            # in 2014 contain gzipped "bin" files. And since the
-            # extraction from the tar-archive returns file handles,
-            # assuming that they belong to plain files, the handles
-            # have to be converted into GzipFile-handles.
-            # Note, that the wradlib parsing function could handle zipped
-            # and plain files, but only when file names are provided
-            if '.gz' in f.name:
-                with gzip.GzipFile(fileobj=f, mode='rb') as f:
+                # Unfortunately, the old "historic" files till somewhere
+                # in 2014 contain gzipped "bin" files. And since the
+                # extraction from the tar-archive returns file handles,
+                # assuming that they belong to plain files, the handles
+                # have to be converted into GzipFile-handles.
+                # Note, that the wradlib parsing function could handle zipped
+                # and plain files, but only when file names are provided
+                if '.gz' in f.name:
+                    with gzip.GzipFile(fileobj=f, mode='rb') as f:
+                        data, metadata = read_in_one_bin_file(f)
+                else:
                     data, metadata = read_in_one_bin_file(f)
-            else:
-                data, metadata = read_in_one_bin_file(f)
-            data = clean_radolan_data(data, metadata)
-            data_list.append(data)
-            metadata_list.append(metadata)
+                data = clean_radolan_data(data, metadata)
+                data_list.append(data)
+                metadata_list.append(metadata)
     return data_list, metadata_list
 
 
