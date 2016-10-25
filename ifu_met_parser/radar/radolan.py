@@ -120,8 +120,12 @@ def download_files_from_ftp(t_start, t_stop, local_data_dir, redownload_existing
 
 
 def _download_one_file(ftp_session, fn_remote, fn_local):
-    with open(fn_local, 'wb') as fh:
-        ftp_session.retrbinary('RETR %s' % fn_remote, fh.write)
+    try:
+        with open(fn_local, 'wb') as fh:
+            ftp_session.retrbinary('RETR %s' % fn_remote, fh.write)
+    except:
+        print('Could not download %s' % fn_remote)
+        os.remove(fn_local)
 
 
 def read_in_one_bin_file(f):
