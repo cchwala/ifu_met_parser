@@ -13,6 +13,7 @@ import ftplib
 import os
 import tarfile
 import gzip
+import glob
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -20,6 +21,7 @@ import pandas as pd
 import xarray as xr
 import wradlib as wrl
 
+from tqdm import tqdm
 
 ftp_server = 'ftp-cdc.dwd.de'
 data_dir_recent = '/pub/CDC/grids_germany/hourly/radolan/recent/bin'
@@ -29,6 +31,11 @@ data_dir_historic = '/pub/CDC/grids_germany/hourly/radolan/historical/bin'
 filename_timestamp_format = {'radolan_recent': 'raa01-rw_10000-%y%m%d%H%M-dwd---bin.gz',
                              'radolan_historic': '%Y/RW%Y%m.tar.gz',
                              'netcdf': 'RADOLAN_%Y.nc'}
+
+
+############################################
+# Functions for downloading raw data files #
+############################################
 
 
 def download_files_from_ftp(t_start, t_stop, local_data_dir, redownload_existing_files=True):
@@ -124,16 +131,26 @@ def _download_one_file(ftp_session, fn_remote, fn_local):
         with open(fn_local, 'wb') as fh:
             ftp_session.retrbinary('RETR %s' % fn_remote, fh.write)
     except:
-        print('Could not download %s' % fn_remote)
-        os.remove(fn_local)
+        print(' Could not download %s' % fn_remote)
+        print('  Second try...')
+        try:
+            with open(fn_local, 'wb') as fh:
+                ftp_session.retrbinary('RETR %s' % fn_remote, fh.write)
+        except:
+            print('  Could not download %s' % fn_remote)
+            os.remove(fn_local)
 
+
+########################################
+# Functions for parsing raw data files #
+########################################
 
 def read_in_one_bin_file(f):
     data, metadata = wrl.io.read_RADOLAN_composite(f)
     return data, metadata
 
 
-def read_in_one_tar_gz_file(fn, print_file_names=False):
+def read_in_one_tar_gz_file(fn, print_filenames=False):
     data_list = []
     metadata_list = []
     # Unzip and untar RADOLAN-bin files and read them in
@@ -141,7 +158,7 @@ def read_in_one_tar_gz_file(fn, print_file_names=False):
         for member in tar.getmembers():
             f = tar.extractfile(member)
             if f is not None:
-                if print_file_names:
+                if print_filenames:
                     print('  Reading in %s' % f.name)
                 # Unfortunately, the old "historic" files till somewhere
                 # in 2014 contain gzipped "bin" files. And since the
@@ -155,13 +172,17 @@ def read_in_one_tar_gz_file(fn, print_file_names=False):
                         data, metadata = read_in_one_bin_file(f)
                 else:
                     data, metadata = read_in_one_bin_file(f)
-                data = clean_radolan_data(data, metadata)
+                data = _clean_radolan_data(data, metadata)
                 data_list.append(data)
                 metadata_list.append(metadata)
-    return data_list, metadata_list
+
+    # Sort by datetime
+    data_list_sorted, metadata_list_sorted = _sort_by_datetime(data_list,
+                                                               metadata_list)
+    return data_list_sorted, metadata_list_sorted
 
 
-def read_in_files(fn_list, print_file_names=False):
+def read_in_files(fn_list, print_filenames=False):
     data_list = []
     metadata_list = []
     for fn in fn_list:
@@ -170,28 +191,28 @@ def read_in_files(fn_list, print_file_names=False):
         # of the "bin" files and the "recent" files which are
         # also "bin" files.
         if 'tar.gz' in fn:
-            if print_file_names:
+            if print_filenames:
                 print(' Untaring %s' % fn)
             (temp_data_list,
              temp_metadata_list) = read_in_one_tar_gz_file(
                                       fn,
-                                      print_file_names=print_file_names)
+                                      print_filenames=print_filenames)
             data_list += temp_data_list
             metadata_list += temp_metadata_list
         else:
-            if print_file_names:
+            if print_filenames:
                 print(' Reading in %s' % fn)
             data, metadata = read_in_one_bin_file(fn)
-            data = clean_radolan_data(data, metadata)
+            data = _clean_radolan_data(data, metadata)
             data_list.append(data)
             metadata_list.append(metadata)
 
-    ds = radolan_to_xarray_dataset(data_list, metadata_list)
+    # ds = radolan_to_xarray_dataset(data_list, metadata_list)
 
-    return ds
+    return data_list, metadata_list
 
 
-def clean_radolan_data(data, metadata):
+def _clean_radolan_data(data, metadata):
     # mask invalid values
     sec = metadata['secondary']
     data.flat[sec] = -9999
@@ -199,51 +220,115 @@ def clean_radolan_data(data, metadata):
     return data
 
 
+def _sort_by_datetime(data_list, metadata_list):
+    datetime_array = np.array([metadata_i['datetime'] for metadata_i in metadata_list])
+    sorting_index = datetime_array.argsort()
+
+    data_list_sorted = [data_list[i] for i in sorting_index]
+    metadata_list_sorted = [metadata_list[i] for i in sorting_index]
+
+    return data_list_sorted, metadata_list_sorted
+
+
+###################################
+# Functions for writing to NetCDF #
+###################################
+
 def radolan_to_xarray_dataset(data, metadata):
     if type(data) != list:
         data = [data, ]
     if type(metadata) != list:
         metadata = [metadata, ]
 
+    # Get coordinates
+    radolan_xy_grids = wrl.georef.get_radolan_grid(900,900)
+    radolan_x = radolan_xy_grids[0, :, 0]
+    radolan_y = radolan_xy_grids[:, 0, 1]
     radolan_lat_lon_grids = wrl.georef.get_radolan_grid(900,900, wgs84=True)
-    radolan_lons = radolan_lat_lon_grids[:,:,0]
-    radolan_lats = radolan_lat_lon_grids[:,:,1]
+    radolan_lons = radolan_lat_lon_grids[:, :, 0]
+    radolan_lats = radolan_lat_lon_grids[:, :, 1]
 
-    # Sort data according to datetime
-    datetime_array = np.array([metadata_i['datetime'] for metadata_i in metadata])
-    sorting_index = datetime_array.argsort()
-    datetime_array_sorted = datetime_array[sorting_index]
-    data_array = np.array(data)
-    data_array_sorted = data_array[sorting_index, :, :]
+    # Sort data by datetime
+    data, metadata = _sort_by_datetime(data, metadata)
+    datetime_list_sorted = [metadata_i['datetime'] for metadata_i in metadata]
 
-    ds = xr.Dataset({'precipitation': (['time', 'x', 'y'], data_array_sorted)},
-                    coords={'lon': (['x', 'y'], radolan_lons),
-                            'lat': (['x', 'y'], radolan_lats),
-                            'time': datetime_array_sorted,
+    # Create a data set
+    ds = xr.Dataset({'rainfall_amount': (['time', 'y', 'x'], data)},
+                    coords={'x': radolan_x,
+                            'y': radolan_y,
+                            'lon': (['y', 'x'], radolan_lons),
+                            'lat': (['y', 'x'], radolan_lats),
+                            'time': datetime_list_sorted,
                             'reference_time': pd.Timestamp('1970-01-01')})
-    #sorted_index = ds.time.argsort()
-    #ds.time = ds.time[sorted_index]
-    #ds.precipitation[:,:,:] = ds.precipitation[sorted_index, :, :]
+
+    # Add metadata to data set
 
     return ds
 
 
-def append_to_yearly_netcdf(data_dir, ds, overwrite_all=False):
+def append_to_yearly_netcdf(netcdf_file_dir, ds, overwrite_all=False):
+    netcdf_fn_list = []
     for year, ds_yearly in ds.groupby('time.year'):
         fn = datetime.strftime(pd.to_datetime(ds_yearly.time.values[0]),
                                format=filename_timestamp_format['netcdf'])
-        fn_full_path = os.path.join(data_dir, fn)
+        fn_full_path = os.path.join(netcdf_file_dir, fn)
+        netcdf_fn_list.append(fn_full_path)
         if not os.path.isfile(fn_full_path) or overwrite_all:
             netcdf_mode = 'w'
             print('Writing to new file %s' % fn_full_path)
+            if not os.path.isdir(os.path.split(fn_full_path)[0]):
+                os.makedirs(os.path.split(fn_full_path)[0])
         else:
             netcdf_mode = 'a'
             print('Appending to %s' % fn_full_path)
         ds_yearly.to_netcdf(fn_full_path,
                             mode=netcdf_mode,
-                            encoding={'precipitation': {'dtype': 'float32',
-                                                        'zlib': True,
-                                                        'complevel': 1}})
+                            encoding={'rainfall_amount': {'dtype': 'float32',
+                                                          'zlib': True,
+                                                          'complevel': 1}})
+    return netcdf_fn_list
+
+
+def create_yearly_netcdfs(raw_data_dir,
+                          netcdf_file_dir,
+                          clear_netcdf_files=True,
+                          print_filenames=False):
+
+    # delete already existing netcdf files if desired
+    if clear_netcdf_files:
+        for fn in glob.glob(os.path.join(netcdf_file_dir, '*.nc')):
+            print('Removing %s' % fn)
+            os.remove(fn)
+
+    # Get the list of raw data files
+    fn_list_historic = glob.glob(os.path.join(raw_data_dir, 'RW*.tar.gz'))
+    fn_list_recent = glob.glob(os.path.join(raw_data_dir, 'raa*bin.gz'))
+
+    # Write NetCDF files for historic files. The parsing and appending
+    # is done for each file separately to limit the size of data that
+    # has to be kept in memory
+    print('Reading and parsing %d historic files' % len(fn_list_historic))
+    for fn in tqdm(fn_list_historic):
+        data_list_temp, metadata_list_temp = read_in_files(
+                                                [fn, ],
+                                                print_filenames=print_filenames)
+        ds = radolan_to_xarray_dataset(data_list_temp, metadata_list_temp)
+        append_to_yearly_netcdf(netcdf_file_dir, ds, overwrite_all=False)
+
+    # Write NetCDF files for recent data, but read in the files
+    # chunk-wise to avoid storing everything in memory
+    chunk_length = 500
+    fn_list_recent_chunks = [fn_list_recent[i:i + chunk_length]
+                             for i in xrange(0, len(fn_list_recent), chunk_length)]
+
+    print('Reading and parsing %d recent files in %d chunks' % (len(fn_list_recent),
+                                                                len(fn_list_recent_chunks)))
+    for fn_list_chunk in tqdm(fn_list_recent_chunks):
+        data_list_temp, metadata_list_temp = read_in_files(fn_list_chunk,
+                                                           print_filenames=print_filenames)
+        ds = radolan_to_xarray_dataset(data_list_temp, metadata_list_temp)
+        append_to_yearly_netcdf(netcdf_file_dir, ds, overwrite_all=False)
+
 
 
 
