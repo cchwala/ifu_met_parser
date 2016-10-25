@@ -50,7 +50,7 @@ def download_files_from_ftp(t_start, t_stop, local_data_dir, redownload_existing
     print('Trying to download RADOLAN files \n from %s \n till %s' % (t_start, t_stop))
 
     # init ftp session
-    ftp_session = ftplib.FTP(ftp_server)
+    ftp_session = ftplib.FTP(ftp_server, timeout=10)
     ftp_session.login()
 
     # change to dir for recent files to get timestamp
