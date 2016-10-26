@@ -19,6 +19,7 @@ from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 import xarray as xr
+import netCDF4
 import wradlib as wrl
 
 from tqdm import tqdm
@@ -30,13 +31,12 @@ data_dir_historic = '/pub/CDC/grids_germany/hourly/radolan/historical/bin'
 # prefix and postfix RADOLAN files
 filename_timestamp_format = {'radolan_recent': 'raa01-rw_10000-%y%m%d%H%M-dwd---bin.gz',
                              'radolan_historic': '%Y/RW%Y%m.tar.gz',
-                             'netcdf': 'RADOLAN_%Y.nc'}
+                             'netcdf': 'RADOLAN_RW_%Y.nc'}
 
 
 ############################################
 # Functions for downloading raw data files #
 ############################################
-
 
 def download_files_from_ftp(t_start, t_stop, local_data_dir, redownload_existing_files=True):
     # Make sure that we work with `datetime` objects
@@ -112,14 +112,16 @@ def download_files_from_ftp(t_start, t_stop, local_data_dir, redownload_existing
 
         if fn not in fn_already_in_local_dir_list:
             print('Downloading %s' % fn_full_path)
-            _download_one_file(ftp_session, fn_full_path, fn_local_full_path)
+            fn_downloaded = _download_one_file(ftp_session, fn_full_path, fn_local_full_path)
         else:
             if redownload_existing_files:
                 print('Redownloading %s' % fn_full_path)
-                _download_one_file(ftp_session, fn_full_path, fn_local_full_path)
+                fn_downloaded = _download_one_file(ftp_session, fn_full_path, fn_local_full_path)
             else:
                 print('Skipping %s' % fn_full_path)
-        fn_downloaded_list.append(os.path.join(local_data_dir,fn))
+                fn_downloaded = fn_local_full_path
+        if fn_downloaded is not None:
+            fn_downloaded_list.append(fn_downloaded)
 
     ftp_session.close()
 
@@ -130,15 +132,18 @@ def _download_one_file(ftp_session, fn_remote, fn_local):
     try:
         with open(fn_local, 'wb') as fh:
             ftp_session.retrbinary('RETR %s' % fn_remote, fh.write)
+            return fn_local
     except:
         print(' Could not download %s' % fn_remote)
         print('  Second try...')
         try:
             with open(fn_local, 'wb') as fh:
                 ftp_session.retrbinary('RETR %s' % fn_remote, fh.write)
+                return fn_local
         except:
             print('  Could not download %s' % fn_remote)
             os.remove(fn_local)
+            return None
 
 
 ########################################
@@ -234,65 +239,124 @@ def _sort_by_datetime(data_list, metadata_list):
 # Functions for writing to NetCDF #
 ###################################
 
-def radolan_to_xarray_dataset(data, metadata):
-    if type(data) != list:
-        data = [data, ]
-    if type(metadata) != list:
-        metadata = [metadata, ]
+def create_empty_netcdf(fn):
+    with netCDF4.Dataset(fn, 'w') as nc_fh:
+        # Get RADOLAN coordinates
+        radolan_xy_grids = wrl.georef.get_radolan_grid(900, 900)
+        radolan_x = radolan_xy_grids[0, :, 0]
+        radolan_y = radolan_xy_grids[:, 0, 1]
+        radolan_lat_lon_grids = wrl.georef.get_radolan_grid(900, 900, wgs84=True)
+        radolan_lons = radolan_lat_lon_grids[:, :, 0]
+        radolan_lats = radolan_lat_lon_grids[:, :, 1]
 
-    # Get coordinates
-    radolan_xy_grids = wrl.georef.get_radolan_grid(900,900)
-    radolan_x = radolan_xy_grids[0, :, 0]
-    radolan_y = radolan_xy_grids[:, 0, 1]
-    radolan_lat_lon_grids = wrl.georef.get_radolan_grid(900,900, wgs84=True)
-    radolan_lons = radolan_lat_lon_grids[:, :, 0]
-    radolan_lats = radolan_lat_lon_grids[:, :, 1]
+        # create dimensions
+        nc_fh.createDimension('x', 900)
+        nc_fh.createDimension('y', 900)
+        nc_fh.createDimension('time', None)
 
-    # Sort data by datetime
-    data, metadata = _sort_by_datetime(data, metadata)
-    datetime_list_sorted = [metadata_i['datetime'] for metadata_i in metadata]
+        # create variables
+        nc_fh.createVariable('x', 'f8', ('x'))
+        nc_fh.createVariable('y', 'f8', ('y'))
+        nc_fh.createVariable('latitudes', 'f8', ('y', 'x'))
+        nc_fh.createVariable('longitudes', 'f8', ('y', 'x'))
+        nc_fh.createVariable('time', 'f8', ('time'))
+        nc_fh.createVariable('rainfall_amount', 'f8', ('time', 'y', 'x'),
+                             zlib=True, complevel=5, fill_value=-9999.9)
 
-    # Create a data set
-    ds = xr.Dataset({'rainfall_amount': (['time', 'y', 'x'], data)},
-                    coords={'x': radolan_x,
-                            'y': radolan_y,
-                            'lon': (['y', 'x'], radolan_lons),
-                            'lat': (['y', 'x'], radolan_lats),
-                            'time': datetime_list_sorted,
-                            'reference_time': pd.Timestamp('1970-01-01')})
+        # variable attributes
+        nc_fh['time'].long_name = 'Time'
+        nc_fh['time'].standard_name = 'time'
+        nc_fh['time'].units = 'hours since 2000-01-01 00:50:00.0'
+        nc_fh['time'].calendar = 'standard'
 
-    # Add metadata to data set
+        nc_fh['x'].long_name = 'RADOLAN Grid x coordinate of projection'
+        nc_fh['x'].standard_name = 'projection_x_coordinate'
+        nc_fh['x'].units = 'km'
 
-    return ds
+        nc_fh['y'].long_name = 'RADOLAN Grid y coordinate of projection'
+        nc_fh['y'].standard_name = 'projection_y_coordinate'
+        nc_fh['y'].units = 'km'
+
+        nc_fh['latitudes'].long_name = 'Latitude'
+        nc_fh['latitudes'].standard_name = 'latitude'
+        nc_fh['latitudes'].units = 'degrees_north'
+
+        nc_fh['longitudes'].long_name = 'Longitude'
+        nc_fh['longitudes'].standard_name = 'longitude'
+        nc_fh['longitudes'].units = 'degrees_east'
+
+        nc_fh['rainfall_amount'].long_name = 'Hourly rainfall'
+        nc_fh['rainfall_amount'].standard_name = 'rainfall_amount'
+        nc_fh['rainfall_amount'].units = 'kg s-1'
+        nc_fh['rainfall_amount'].coordinates = 'latitudes longitudes'
+        nc_fh['rainfall_amount'].grid_mapping = 'RADOLAN_grid'
+
+        # global attributes
+        nc_fh.title = 'RADOLAN RW rainfall data'
+        nc_fh.source = 'ftp://ftp-cdc.dwd.de/pub/CDC/grids_germany/hourly/radolan/'
+        nc_fh.institution = 'DWD'
+        nc_fh.history = 'Created at ' + str(datetime.utcnow())
+        nc_fh.Conventions = 'CF 1.6'
+
+        # Add actual coordinate data
+        nc_fh['latitudes'][:, :] = radolan_lats
+        nc_fh['longitudes'][:, :] = radolan_lons
+        nc_fh['x'][:] = radolan_x
+        nc_fh['y'][:] = radolan_y
+
+        # Add projection definition
+        nc_fh.createVariable('radolan_grid', 'f8')
+        nc_fh['radolan_grid'].long_name = 'RADOLAN Grid'
+        nc_fh['radolan_grid'].grid_mapping_name = 'polar_stereographic'
+        nc_fh['radolan_grid'].semi_major_axis = 6370040.0
+        nc_fh['radolan_grid'].false_easting = 0.0
+        nc_fh['radolan_grid'].false_northing = 0.0
+        nc_fh['radolan_grid'].standard_parallel = 10
+        nc_fh['radolan_grid'].straight_vertical_longitude_from_pole = 30
+        nc_fh['radolan_grid'].latitude_of_projection_origin = 90.0
+
+    return None
 
 
-def append_to_yearly_netcdf(netcdf_file_dir, ds, overwrite_all=False):
-    netcdf_fn_list = []
-    for year, ds_yearly in ds.groupby('time.year'):
-        fn = datetime.strftime(pd.to_datetime(ds_yearly.time.values[0]),
-                               format=filename_timestamp_format['netcdf'])
-        fn_full_path = os.path.join(netcdf_file_dir, fn)
-        netcdf_fn_list.append(fn_full_path)
-        if not os.path.isfile(fn_full_path) or overwrite_all:
-            netcdf_mode = 'w'
-            print('Writing to new file %s' % fn_full_path)
-            if not os.path.isdir(os.path.split(fn_full_path)[0]):
-                os.makedirs(os.path.split(fn_full_path)[0])
-        else:
-            netcdf_mode = 'a'
-            print('Appending to %s' % fn_full_path)
-        ds_yearly.to_netcdf(fn_full_path,
-                            mode=netcdf_mode,
-                            encoding={'rainfall_amount': {'dtype': 'float32',
-                                                          'zlib': True,
-                                                          'complevel': 1}})
-    return netcdf_fn_list
+def append_to_netcdf(fn, data_list, metadata_list):
+    if type(data_list) != list:
+        data_list = [data_list, ]
+    if type(metadata_list) != list:
+        metadata_list = [metadata_list, ]
+    with netCDF4.Dataset(fn, 'a') as nc_fh:
+        current_length = len(nc_fh['time'][:])
+        for i, (data, metadata) in enumerate(zip(data_list, metadata_list)):
+            i_new = i + current_length
+            nc_fh['time'][i_new] = netCDF4.date2num(metadata['datetime'],
+                                                    units=nc_fh['time'].units,
+                                                    calendar=nc_fh['time'].calendar)
+            nc_fh['rainfall_amount'][i_new, :, :] = data
+
+
+def append_to_yearly_netcdf(netcdf_file_dir,
+                            data_list,
+                            metadata_list):
+    for data, metadata in zip(data_list, metadata_list):
+        netcdf_fn = datetime.strftime(metadata['datetime'],
+                                      filename_timestamp_format['netcdf'])
+        netcdf_fn_full_path = os.path.join(netcdf_file_dir, netcdf_fn)
+        if not os.path.isfile(netcdf_fn_full_path):
+            print('Creating new file %s' % netcdf_fn_full_path)
+            create_empty_netcdf(netcdf_fn_full_path)
+        # print('Appending to %s for t=%s' % (netcdf_fn_full_path,
+        #                                    str(metadata['datetime'])))
+        append_to_netcdf(netcdf_fn_full_path, data, metadata)
+
+    return
 
 
 def create_yearly_netcdfs(raw_data_dir,
                           netcdf_file_dir,
                           clear_netcdf_files=True,
                           print_filenames=False):
+
+    if not os.path.isdir(netcdf_file_dir):
+        os.mkdir(netcdf_file_dir)
 
     # delete already existing netcdf files if desired
     if clear_netcdf_files:
@@ -306,14 +370,18 @@ def create_yearly_netcdfs(raw_data_dir,
 
     # Write NetCDF files for historic files. The parsing and appending
     # is done for each file separately to limit the size of data that
-    # has to be kept in memory
+    # has to be kept in memory. Please note that one historic tar.gz-file
+    # still already contains more than 700 bin files and hence the parsed
+    # data will be roughly 5 GB.
     print('Reading and parsing %d historic files' % len(fn_list_historic))
-    for fn in tqdm(fn_list_historic):
+    for fn in fn_list_historic:
+        print('Working on %s...' % fn)
         data_list_temp, metadata_list_temp = read_in_files(
                                                 [fn, ],
                                                 print_filenames=print_filenames)
-        ds = radolan_to_xarray_dataset(data_list_temp, metadata_list_temp)
-        append_to_yearly_netcdf(netcdf_file_dir, ds, overwrite_all=False)
+        append_to_yearly_netcdf(netcdf_file_dir,
+                                data_list_temp,
+                                metadata_list_temp)
 
     # Write NetCDF files for recent data, but read in the files
     # chunk-wise to avoid storing everything in memory
@@ -321,14 +389,62 @@ def create_yearly_netcdfs(raw_data_dir,
     fn_list_recent_chunks = [fn_list_recent[i:i + chunk_length]
                              for i in xrange(0, len(fn_list_recent), chunk_length)]
 
-    print('Reading and parsing %d recent files in %d chunks' % (len(fn_list_recent),
-                                                                len(fn_list_recent_chunks)))
-    for fn_list_chunk in tqdm(fn_list_recent_chunks):
+    print('Reading and parsing %d recent files in %d chunks' %
+          (len(fn_list_recent),
+           len(fn_list_recent_chunks)))
+    for i, fn_list_chunk in enumerate(fn_list_recent_chunks):
+        print('Working on chunk %d/%d with %d files...' %
+              (i+1,
+               len(fn_list_recent_chunks),
+               len(fn_list_chunk)))
         data_list_temp, metadata_list_temp = read_in_files(fn_list_chunk,
                                                            print_filenames=print_filenames)
-        ds = radolan_to_xarray_dataset(data_list_temp, metadata_list_temp)
-        append_to_yearly_netcdf(netcdf_file_dir, ds, overwrite_all=False)
+        append_to_yearly_netcdf(netcdf_file_dir,
+                                data_list_temp,
+                                metadata_list_temp)
 
 
+################################################################
+# Functions for continuously updating NetCDFs with recent data #
+################################################################
+
+def get_last_time_stamp_from_netcdfs(netcdf_file_dir, fn_pattern='RADOLAN_*.nc'):
+    fn_list = glob.glob(os.path.join(netcdf_file_dir, fn_pattern))
+    ds = xr.open_mfdataset(fn_list)
+    ts_max = ds.time[:].values.max()
+    ds.close()
+    return ts_max
 
 
+def download_latest_files_from_ftp(local_data_dir, netcdf_file_dir):
+    netcdf_ts_last = get_last_time_stamp_from_netcdfs(netcdf_file_dir)
+    fn_list = download_files_from_ftp(t_start=netcdf_ts_last + np.timedelta64(1, 'h'),
+                                      t_stop=datetime.utcnow(),
+                                      local_data_dir=local_data_dir,
+                                      redownload_existing_files=False)
+    return fn_list
+
+
+def update_recent_netcdf(local_data_dir, netcdf_file_dir):
+    fn_list = download_latest_files_from_ftp(local_data_dir,
+                                             netcdf_file_dir)
+
+    # Write NetCDF files, but read in the files
+    # chunk-wise to avoid storing everything in memory
+    chunk_length = 200
+    fn_list_chunks = [fn_list[i:i + chunk_length]
+                             for i in xrange(0, len(fn_list), chunk_length)]
+
+    print('Reading and parsing %d recent files in %d chunks' %
+          (len(fn_list),
+           len(fn_list_chunks)))
+    for i, fn_list_chunk in enumerate(fn_list_chunks):
+        print('Working on chunk %d/%d with %d files...' %
+              (i+1,
+               len(fn_list_chunks),
+               len(fn_list_chunk)))
+        data_list_temp, metadata_list_temp = read_in_files(fn_list_chunk,
+                                                           print_filenames=True)
+        append_to_yearly_netcdf(netcdf_file_dir,
+                                data_list_temp,
+                                metadata_list_temp)
