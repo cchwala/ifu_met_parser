@@ -268,8 +268,12 @@ def create_empty_netcdf(fn):
         nc_fh.createVariable('latitudes', 'f8', ('y', 'x'))
         nc_fh.createVariable('longitudes', 'f8', ('y', 'x'))
         nc_fh.createVariable('time', 'f8', ('time'))
-        nc_fh.createVariable('rainfall_amount', 'f8', ('time', 'y', 'x'),
-                             zlib=True, complevel=5, fill_value=-9999.9)
+        nc_fh.createVariable('rainfall_amount', 'i2', ('time', 'y', 'x'),
+                             zlib=True, complevel=5, fill_value=9999)
+        nc_fh['rainfall_amount'].scale_factor = 0.1
+        nc_fh['rainfall_amount'].add_offset = 0
+
+        nc_fh.set_auto_maskandscale(True)
 
         # variable attributes
         nc_fh['time'].long_name = 'Time'
@@ -339,6 +343,9 @@ def append_to_netcdf(fn, data_list, metadata_list):
                                                     units=nc_fh['time'].units,
                                                     calendar=nc_fh['time'].calendar)
             nc_fh['rainfall_amount'][i_new, :, :] = data
+            #nc_fh['rainfall_amount'][i_new, :, :] = (data * 10).astype(np.int16)
+            #nc_fh['rainfall_amount'].scale_factor = 0.1
+            #nc_fh['rainfall_amount'].add_offset = 0
 
 
 def append_to_yearly_netcdf(netcdf_file_dir,
