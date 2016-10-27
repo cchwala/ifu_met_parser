@@ -34,6 +34,18 @@ filename_timestamp_format = {'radolan_recent': 'raa01-rw_10000-%y%m%d%H%M-dwd---
                              'netcdf': 'RADOLAN_RW_%Y.nc'}
 
 
+# Constants for the RADOLAN rainfall_amount NetCDF-variable
+NETCDF_SCALING_FACTOR = 0.1
+NETCDF_DATA_TYPE = 'i2'
+# Value that represents missing data in the NetCDF file
+# for the RADOLAN rainfall_amount
+NETCDF_FILL_VALUE_INT = -9999
+# Value that has to be used in the data array that will be written
+# to the NetCDF file. This value has to be scaled, so that it
+# matches what ends up in the file
+NETCDF_FILL_VALUE_FLOAT = float(NETCDF_FILL_VALUE_INT)*NETCDF_SCALING_FACTOR
+
+
 ############################################
 # Functions for downloading raw data files #
 ############################################
@@ -267,9 +279,10 @@ def create_empty_netcdf(fn):
         nc_fh.createVariable('latitudes', 'f8', ('y', 'x'))
         nc_fh.createVariable('longitudes', 'f8', ('y', 'x'))
         nc_fh.createVariable('time', 'f8', ('time'))
-        nc_fh.createVariable('rainfall_amount', 'i2', ('time', 'y', 'x'),
-                             zlib=True, complevel=5, fill_value=9999)
-        nc_fh['rainfall_amount'].scale_factor = 0.1
+        nc_fh.createVariable('rainfall_amount', NETCDF_DATA_TYPE, ('time', 'y', 'x'),
+                             zlib=True, complevel=5,
+                             fill_value=NETCDF_FILL_VALUE_INT)
+        nc_fh['rainfall_amount'].scale_factor = NETCDF_SCALING_FACTOR
         nc_fh['rainfall_amount'].add_offset = 0
 
         nc_fh.set_auto_maskandscale(True)
@@ -307,7 +320,7 @@ def create_empty_netcdf(fn):
         nc_fh.source = 'ftp://ftp-cdc.dwd.de/pub/CDC/grids_germany/hourly/radolan/'
         nc_fh.institution = 'DWD'
         nc_fh.history = 'Created at ' + str(datetime.utcnow())
-        nc_fh.Conventions = 'CF 1.6'
+        nc_fh.Conventions = 'CF-1.6'
 
         # Add actual coordinate data
         nc_fh['latitudes'][:, :] = radolan_lats
@@ -341,7 +354,9 @@ def append_to_netcdf(fn, data_list, metadata_list):
             nc_fh['time'][i_new] = netCDF4.date2num(metadata['datetime'],
                                                     units=nc_fh['time'].units,
                                                     calendar=nc_fh['time'].calendar)
-            nc_fh['rainfall_amount'][i_new, :, :] = data
+            temp_data = data.copy()
+            temp_data[np.isnan(temp_data)] = NETCDF_FILL_VALUE_FLOAT
+            nc_fh['rainfall_amount'][i_new, :, :] = temp_data
 
 
 def append_to_yearly_netcdf(netcdf_file_dir,
