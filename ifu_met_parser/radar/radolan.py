@@ -394,6 +394,9 @@ def create_yearly_netcdfs(raw_data_dir,
     fn_list_historic = glob.glob(os.path.join(raw_data_dir, 'RW*.tar.gz'))
     fn_list_recent = glob.glob(os.path.join(raw_data_dir, 'raa*bin.gz'))
 
+    fn_list_historic.sort()
+    fn_list_recent.sort()
+
     # Write NetCDF files for historic files. The parsing and appending
     # is done for each file separately to limit the size of data that
     # has to be kept in memory. Please note that one historic tar.gz-file
