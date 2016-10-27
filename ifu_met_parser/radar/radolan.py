@@ -400,40 +400,64 @@ def create_yearly_netcdfs(raw_data_dir,
     fn_list_historic.sort()
     fn_list_recent.sort()
 
-    # Write NetCDF files for historic files. The parsing and appending
-    # is done for each file separately to limit the size of data that
-    # has to be kept in memory. Please note that one historic tar.gz-file
-    # still already contains more than 700 bin files and hence the parsed
-    # data will be roughly 5 GB.
-    print('Reading and parsing %d historic files' % len(fn_list_historic))
-    for fn in fn_list_historic:
-        print('Working on %s...' % fn)
+    # Write NetCDF files for historic files.
+    read_in_files_and_append_to_yearly_netcdf(fn_list_historic,
+                                              netcdf_file_dir,
+                                              print_filenames)
+
+    # Write NetCDF files for recent files. The `fn_list` gets
+    # divided into chunks within the function to avoid that too
+    # the data that has to be temporarily stored in memory gets
+    # to large.
+    chunk_length = 200
+    read_in_files_chunked_and_append_to_yearly_netcdf(fn_list_recent,
+                                                      chunk_length,
+                                                      netcdf_file_dir,
+                                                      print_filenames)
+
+
+def read_in_files_and_append_to_yearly_netcdf(fn_list,
+                                              netcdf_file_dir,
+                                              print_filenames=False):
+    if type(fn_list) != list:
+        fn_list = [fn_list, ]
+
+    data_list = []
+    metadata_list = []
+    print('Reading and parsing %d files...' % len(fn_list))
+    for fn in fn_list:
         data_list_temp, metadata_list_temp = read_in_files(
                                                 [fn, ],
                                                 print_filenames=print_filenames)
-        append_to_yearly_netcdf(netcdf_file_dir,
-                                data_list_temp,
-                                metadata_list_temp)
+        data_list += data_list_temp
+        metadata_list += metadata_list_temp
 
-    # Write NetCDF files for recent data, but read in the files
-    # chunk-wise to avoid storing everything in memory
-    chunk_length = 500
-    fn_list_recent_chunks = [fn_list_recent[i:i + chunk_length]
-                             for i in xrange(0, len(fn_list_recent), chunk_length)]
+    append_to_yearly_netcdf(netcdf_file_dir,
+                            data_list,
+                            metadata_list)
 
-    print('Reading and parsing %d recent files in %d chunks' %
-          (len(fn_list_recent),
-           len(fn_list_recent_chunks)))
-    for i, fn_list_chunk in enumerate(fn_list_recent_chunks):
-        print('Working on chunk %d/%d with %d files...' %
+
+def read_in_files_chunked_and_append_to_yearly_netcdf(fn_list,
+                                                      chunk_length,
+                                                      netcdf_file_dir,
+                                                      print_filenames=False):
+    if type(fn_list) != list:
+        fn_list = [fn_list, ]
+
+    fn_list_chunks = [fn_list[i:i + chunk_length]
+                      for i in xrange(0, len(fn_list), chunk_length)]
+    print('Reading and parsing %d files in %d chunks' %
+          (len(fn_list),
+           len(fn_list_chunks)))
+
+    for i, fn_list_chunk in enumerate(fn_list_chunks):
+        print(' Working on chunk %d/%d with %d files...' %
               (i+1,
-               len(fn_list_recent_chunks),
+               len(fn_list_chunks),
                len(fn_list_chunk)))
-        data_list_temp, metadata_list_temp = read_in_files(fn_list_chunk,
-                                                           print_filenames=print_filenames)
-        append_to_yearly_netcdf(netcdf_file_dir,
-                                data_list_temp,
-                                metadata_list_temp)
+        read_in_files_and_append_to_yearly_netcdf(fn_list_chunk,
+                                                  netcdf_file_dir,
+                                                  print_filenames=print_filenames)
 
 
 ################################################################
@@ -458,6 +482,9 @@ def download_latest_files_from_ftp(local_data_dir, netcdf_file_dir):
 
 
 def update_recent_netcdf(local_data_dir, netcdf_file_dir, N_retries=10, wait_sec=10):
+
+    print_filenames = True
+
     retries = 0
     while retries < N_retries:
         try:
@@ -474,23 +501,32 @@ def update_recent_netcdf(local_data_dir, netcdf_file_dir, N_retries=10, wait_sec
     if retries == N_retries:
         raise IOError('Could not download file, even after %d retries' % retries)
 
+    # Divide the list into historic tar.gz-files and current .gz-files
+    fn_list_historic = []
+    fn_list_recent = []
+    for fn in fn_list:
+        if 'bin.gz' in fn:
+            fn_list_recent.append(fn)
+        elif 'tar.gz' in fn:
+            fn_list_historic.append(fn)
+        else:
+            print(' !!! File name not recognized !!!')
 
-    # Write NetCDF files, but read in the files
-    # chunk-wise to avoid storing everything in memory
+    fn_list_historic.sort()
+    fn_list_recent.sort()
+
+    # Write NetCDF files for historic files.
+    read_in_files_and_append_to_yearly_netcdf(fn_list_historic,
+                                              netcdf_file_dir,
+                                              print_filenames)
+
+    # Write NetCDF files for recent files. The `fn_list` gets
+    # divided into chunks within the function to avoid that too
+    # the data that has to be temporarily stored in memory gets
+    # to large.
     chunk_length = 200
-    fn_list_chunks = [fn_list[i:i + chunk_length]
-                             for i in xrange(0, len(fn_list), chunk_length)]
+    read_in_files_chunked_and_append_to_yearly_netcdf(fn_list_recent,
+                                                      chunk_length,
+                                                      netcdf_file_dir,
+                                                      print_filenames)
 
-    print('Reading and parsing %d recent files in %d chunks' %
-          (len(fn_list),
-           len(fn_list_chunks)))
-    for i, fn_list_chunk in enumerate(fn_list_chunks):
-        print('Working on chunk %d/%d with %d files...' %
-              (i+1,
-               len(fn_list_chunks),
-               len(fn_list_chunk)))
-        data_list_temp, metadata_list_temp = read_in_files(fn_list_chunk,
-                                                           print_filenames=True)
-        append_to_yearly_netcdf(netcdf_file_dir,
-                                data_list_temp,
-                                metadata_list_temp)
