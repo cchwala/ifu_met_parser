@@ -171,39 +171,46 @@ def read_in_one_bin_file(f):
     return data, metadata
 
 
+def _iterate_through_tar_gz_file(fn):
+    with tarfile.open(fn, "r:gz") as tar:
+        # Get file names to be able to sort them
+        fn_list = []
+        member_list = []
+        for member in tar.getmembers():
+            f = tar.extractfile(member)
+            fn_list.append(f.name)
+            member_list.append(member)
+        sorted_index = np.argsort((np.array(fn_list)))
+
+        # Produce generator
+        for i_member in sorted_index:
+            member = member_list[i_member]
+            f = tar.extractfile(member)
+            if f is None:
+                yield f
+            else:
+                if '.gz' in f.name:
+                    with gzip.GzipFile(fileobj=f, mode='rb') as f:
+                        yield f
+                else:
+                    yield f
+
+
 def read_in_one_tar_gz_file(fn, print_filenames=False):
     data_list = []
     metadata_list = []
-    # Unzip and untar RADOLAN-bin files and read them in
-    with tarfile.open(fn, "r:gz") as tar:
-        for member in tar.getmembers():
-            f = tar.extractfile(member)
-            if f is not None:
-                if print_filenames:
-                    print('  Reading in %s' % f.name)
-                # Unfortunately, the old "historic" files till somewhere
-                # in 2014 contain gzipped "bin" files. And since the
-                # extraction from the tar-archive returns file handles,
-                # assuming that they belong to plain files, the handles
-                # have to be converted into GzipFile-handles.
-                # Note, that the wradlib parsing function could handle zipped
-                # and plain files, but only when file names are provided
-                try:
-                    if '.gz' in f.name:
-                        with gzip.GzipFile(fileobj=f, mode='rb') as f:
-                            data, metadata = read_in_one_bin_file(f)
-                    else:
-                        data, metadata = read_in_one_bin_file(f)
-                    data = _clean_radolan_data(data, metadata)
-                    data_list.append(data)
-                    metadata_list.append(metadata)
-                except:
-                    print('  !!!!!!!! Could not read in file %s !!!!!!!!!!!' % fn)
+    for fh_in_tar in _iterate_through_tar_gz_file(fn):
+        try:
+            if print_filenames:
+                print('Reading in %s from tar-file' % fh_in_tar.name)
+            #data, metadata = read_in_one_bin_file(fh_in_tar)
+            #data = _clean_radolan_data(data, metadata)
+            #data_list.append(data)
+            #metadata_list.append(metadata)
+        except:
+            print('  !!!!!!!! Could not read in file %s !!!!!!!!!!!' % fn)
 
-    # Sort by datetime
-    data_list_sorted, metadata_list_sorted = _sort_by_datetime(data_list,
-                                                               metadata_list)
-    return data_list_sorted, metadata_list_sorted
+    return data_list, metadata_list
 
 
 def read_in_files(fn_list, print_filenames=False):
@@ -362,9 +369,12 @@ def append_to_netcdf(fn, data_list, metadata_list):
             nc_fh['rainfall_amount'][i_new, :, :] = temp_data
 
 
-def append_to_yearly_netcdf(netcdf_file_dir,
-                            data_list,
-                            metadata_list):
+def append_to_yearly_netcdf(netcdf_file_dir, data_list, metadata_list):
+    if type(data_list) != list:
+        data_list = [data_list, ]
+    if type(metadata_list) != list:
+        metadata_list = [metadata_list, ]
+
     for data, metadata in zip(data_list, metadata_list):
         netcdf_fn = datetime.strftime(metadata['datetime'],
                                       filename_timestamp_format['netcdf'])
@@ -377,6 +387,30 @@ def append_to_yearly_netcdf(netcdf_file_dir,
         append_to_netcdf(netcdf_fn_full_path, data, metadata)
 
     return
+
+
+#########################################################
+# Functions for reading and directly parsing to NetCDFs #
+#########################################################
+
+def parse_files_and_append_to_yearly_netcdf(fn_list, netcdf_file_dir, print_filenames=True):
+    if type(fn_list) == str:
+        fn_list = [fn_list, ]
+
+    for fn in fn_list:
+        if 'tar.gz' in fn:
+            if print_filenames:
+                print(' Untaring %s' % fn)
+            for fh_in_tar in _iterate_through_tar_gz_file(fn):
+                if print_filenames:
+                    print('  Parsing %s' % fh_in_tar.name)
+                data, metadata = read_in_one_bin_file(fh_in_tar)
+                append_to_yearly_netcdf(netcdf_file_dir, data, metadata)
+        else:
+            if print_filenames:
+                print('Parsing %s' % fn)
+            data, metadata = read_in_one_bin_file(fn)
+            append_to_yearly_netcdf(netcdf_file_dir, data, metadata)
 
 
 def create_yearly_netcdfs(raw_data_dir,
@@ -401,63 +435,17 @@ def create_yearly_netcdfs(raw_data_dir,
     fn_list_recent.sort()
 
     # Write NetCDF files for historic files.
-    read_in_files_and_append_to_yearly_netcdf(fn_list_historic,
-                                              netcdf_file_dir,
-                                              print_filenames)
+    parse_files_and_append_to_yearly_netcdf(fn_list_historic,
+                                            netcdf_file_dir,
+                                            print_filenames)
 
     # Write NetCDF files for recent files. The `fn_list` gets
     # divided into chunks within the function to avoid that too
     # the data that has to be temporarily stored in memory gets
     # to large.
-    chunk_length = 200
-    read_in_files_chunked_and_append_to_yearly_netcdf(fn_list_recent,
-                                                      chunk_length,
-                                                      netcdf_file_dir,
-                                                      print_filenames)
-
-
-def read_in_files_and_append_to_yearly_netcdf(fn_list,
-                                              netcdf_file_dir,
-                                              print_filenames=False):
-    if type(fn_list) != list:
-        fn_list = [fn_list, ]
-
-    data_list = []
-    metadata_list = []
-    print('Reading and parsing %d files...' % len(fn_list))
-    for fn in fn_list:
-        data_list_temp, metadata_list_temp = read_in_files(
-                                                [fn, ],
-                                                print_filenames=print_filenames)
-        data_list += data_list_temp
-        metadata_list += metadata_list_temp
-
-    append_to_yearly_netcdf(netcdf_file_dir,
-                            data_list,
-                            metadata_list)
-
-
-def read_in_files_chunked_and_append_to_yearly_netcdf(fn_list,
-                                                      chunk_length,
-                                                      netcdf_file_dir,
-                                                      print_filenames=False):
-    if type(fn_list) != list:
-        fn_list = [fn_list, ]
-
-    fn_list_chunks = [fn_list[i:i + chunk_length]
-                      for i in xrange(0, len(fn_list), chunk_length)]
-    print('Reading and parsing %d files in %d chunks' %
-          (len(fn_list),
-           len(fn_list_chunks)))
-
-    for i, fn_list_chunk in enumerate(fn_list_chunks):
-        print(' Working on chunk %d/%d with %d files...' %
-              (i+1,
-               len(fn_list_chunks),
-               len(fn_list_chunk)))
-        read_in_files_and_append_to_yearly_netcdf(fn_list_chunk,
-                                                  netcdf_file_dir,
-                                                  print_filenames=print_filenames)
+    parse_files_and_append_to_yearly_netcdf(fn_list_recent,
+                                            netcdf_file_dir,
+                                            print_filenames)
 
 
 ################################################################
