@@ -188,14 +188,17 @@ def read_in_one_tar_gz_file(fn, print_filenames=False):
                 # have to be converted into GzipFile-handles.
                 # Note, that the wradlib parsing function could handle zipped
                 # and plain files, but only when file names are provided
-                if '.gz' in f.name:
-                    with gzip.GzipFile(fileobj=f, mode='rb') as f:
+                try:
+                    if '.gz' in f.name:
+                        with gzip.GzipFile(fileobj=f, mode='rb') as f:
+                            data, metadata = read_in_one_bin_file(f)
+                    else:
                         data, metadata = read_in_one_bin_file(f)
-                else:
-                    data, metadata = read_in_one_bin_file(f)
-                data = _clean_radolan_data(data, metadata)
-                data_list.append(data)
-                metadata_list.append(metadata)
+                    data = _clean_radolan_data(data, metadata)
+                    data_list.append(data)
+                    metadata_list.append(metadata)
+                except:
+                    print('  !!!!!!!! Could not read in file %s !!!!!!!!!!!' % fn)
 
     # Sort by datetime
     data_list_sorted, metadata_list_sorted = _sort_by_datetime(data_list,
