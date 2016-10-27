@@ -15,6 +15,7 @@ import tarfile
 import gzip
 import glob
 from datetime import datetime, timedelta
+from time import sleep
 
 import numpy as np
 import pandas as pd
@@ -57,7 +58,11 @@ def download_files_from_ftp(t_start, t_stop, local_data_dir, redownload_existing
     print('Trying to download RADOLAN files \n from %s \n till %s' % (t_start, t_stop))
 
     # init ftp session
-    ftp_session = ftplib.FTP(ftp_server, timeout=10)
+    try:
+        ftp_session = ftplib.FTP(ftp_server, timeout=10)
+    except:
+        raise IOError('Could not connect to FTP server')
+
     ftp_session.login()
 
     # change to dir for recent files to get timestamp
@@ -207,10 +212,13 @@ def read_in_files(fn_list, print_filenames=False):
         else:
             if print_filenames:
                 print(' Reading in %s' % fn)
-            data, metadata = read_in_one_bin_file(fn)
-            data = _clean_radolan_data(data, metadata)
-            data_list.append(data)
-            metadata_list.append(metadata)
+            try:
+                data, metadata = read_in_one_bin_file(fn)
+                data = _clean_radolan_data(data, metadata)
+                data_list.append(data)
+                metadata_list.append(metadata)
+            except:
+                print('  !!!!!!!! Could not read in file %s !!!!!!!!!!!' % fn)
 
     # ds = radolan_to_xarray_dataset(data_list, metadata_list)
 
@@ -425,9 +433,23 @@ def download_latest_files_from_ftp(local_data_dir, netcdf_file_dir):
     return fn_list
 
 
-def update_recent_netcdf(local_data_dir, netcdf_file_dir):
-    fn_list = download_latest_files_from_ftp(local_data_dir,
-                                             netcdf_file_dir)
+def update_recent_netcdf(local_data_dir, netcdf_file_dir, N_retries=10, wait_sec=10):
+    retries = 0
+    while retries < N_retries:
+        try:
+            if retries > 0:
+                print('Try #%d to download file via ftp' % retries)
+            fn_list = download_latest_files_from_ftp(local_data_dir,
+                                                     netcdf_file_dir)
+            break
+        except IOError, e:
+            print(e)
+            retries += 1
+            sleep(wait_sec)
+
+    if retries == N_retries:
+        raise IOError('Could not download file, even after %d retries' % retries)
+
 
     # Write NetCDF files, but read in the files
     # chunk-wise to avoid storing everything in memory
