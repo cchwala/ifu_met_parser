@@ -23,7 +23,6 @@ import xarray as xr
 import netCDF4
 import wradlib as wrl
 
-from tqdm import tqdm
 
 ftp_server = 'ftp-cdc.dwd.de'
 data_dir_recent = '/pub/CDC/grids_germany/hourly/radolan/recent/bin'
@@ -343,9 +342,6 @@ def append_to_netcdf(fn, data_list, metadata_list):
                                                     units=nc_fh['time'].units,
                                                     calendar=nc_fh['time'].calendar)
             nc_fh['rainfall_amount'][i_new, :, :] = data
-            #nc_fh['rainfall_amount'][i_new, :, :] = (data * 10).astype(np.int16)
-            #nc_fh['rainfall_amount'].scale_factor = 0.1
-            #nc_fh['rainfall_amount'].add_offset = 0
 
 
 def append_to_yearly_netcdf(netcdf_file_dir,
