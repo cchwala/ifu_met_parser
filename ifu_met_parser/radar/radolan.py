@@ -199,18 +199,47 @@ def _iterate_through_tar_gz_file(fn):
 def read_in_one_tar_gz_file(fn, print_filenames=False):
     data_list = []
     metadata_list = []
-    for fh_in_tar in _iterate_through_tar_gz_file(fn):
-        try:
-            if print_filenames:
-                print('Reading in %s from tar-file' % fh_in_tar.name)
-            #data, metadata = read_in_one_bin_file(fh_in_tar)
-            #data = _clean_radolan_data(data, metadata)
-            #data_list.append(data)
-            #metadata_list.append(metadata)
-        except:
-            print('  !!!!!!!! Could not read in file %s !!!!!!!!!!!' % fn)
+    # Unzip and untar RADOLAN-bin files and read them in
+    with tarfile.open(fn, "r:gz") as tar:
+        # Get file names to be able to sort them
+        fn_list = []
+        member_list = []
+        for member in tar.getmembers():
+            f = tar.extractfile(member)
+            fn_list.append(f.name)
+            member_list.append(member)
+        sorted_index = np.argsort((np.array(fn_list)))
 
-    return data_list, metadata_list
+        # Iterate through
+        for i_member in sorted_index:
+            member = member_list[i_member]
+            f = tar.extractfile(member)
+            if f is not None:
+                if print_filenames:
+                    print('  Reading in %s' % f.name)
+                # Unfortunately, the old "historic" files till somewhere
+                # in 2014 contain gzipped "bin" files. And since the
+                # extraction from the tar-archive returns file handles,
+                # assuming that they belong to plain files, the handles
+                # have to be converted into GzipFile-handles.
+                # Note, that the wradlib parsing function could handle zipped
+                # and plain files, but only when file names are provided
+                try:
+                    if '.gz' in f.name:
+                        with gzip.GzipFile(fileobj=f, mode='rb') as f:
+                            data, metadata = read_in_one_bin_file(f)
+                    else:
+                        data, metadata = read_in_one_bin_file(f)
+                    data = _clean_radolan_data(data, metadata)
+                    data_list.append(data)
+                    metadata_list.append(metadata)
+                except:
+                    print('  !!!!!!!! Could not read in file %s !!!!!!!!!!!' % fn)
+
+    # Sort by datetime
+    data_list_sorted, metadata_list_sorted = _sort_by_datetime(data_list,
+                                                               metadata_list)
+    return data_list_sorted, metadata_list_sorted
 
 
 def read_in_files(fn_list, print_filenames=False):
@@ -401,11 +430,35 @@ def parse_files_and_append_to_yearly_netcdf(fn_list, netcdf_file_dir, print_file
         if 'tar.gz' in fn:
             if print_filenames:
                 print(' Untaring %s' % fn)
-            for fh_in_tar in _iterate_through_tar_gz_file(fn):
-                if print_filenames:
-                    print('  Parsing %s' % fh_in_tar.name)
-                data, metadata = read_in_one_bin_file(fh_in_tar)
-                append_to_yearly_netcdf(netcdf_file_dir, data, metadata)
+            with tarfile.open(fn, "r:gz") as tar:
+                # Get file names to be able to sort them
+                fn_list = []
+                member_list = []
+                for member in tar.getmembers():
+                    f = tar.extractfile(member)
+                    fn_list.append(f.name)
+                    member_list.append(member)
+                sorted_index = np.argsort((np.array(fn_list)))
+
+                # Iterate through
+                for i_member in sorted_index:
+                    member = member_list[i_member]
+                    f = tar.extractfile(member)
+                    if f is None:
+                        print('  !!! tar.extractfile() returned None for %s !!!' % f.name)
+                    else:
+                        if print_filenames:
+                            print('Parsing %s' % f.name)
+                        try:
+                            if '.gz' in f.name:
+                                with gzip.GzipFile(fileobj=f, mode='rb') as f:
+                                    data, metadata = read_in_one_bin_file(f)
+                            else:
+                                data, metadata = read_in_one_bin_file(f)
+                            data = _clean_radolan_data(data, metadata)
+                            append_to_yearly_netcdf(netcdf_file_dir, data, metadata)
+                        except:
+                            print('  !!!!!!!! Could not read in file %s !!!!!!!!!!!' % fn)
         else:
             if print_filenames:
                 print('Parsing %s' % fn)
