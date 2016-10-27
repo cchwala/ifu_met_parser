@@ -312,7 +312,7 @@ def create_empty_netcdf(fn):
         nc_fh['rainfall_amount'].long_name = 'Hourly rainfall'
         nc_fh['rainfall_amount'].standard_name = 'rainfall_amount'
         nc_fh['rainfall_amount'].units = 'kg s-1'
-        nc_fh['rainfall_amount'].coordinates = 'latitudes longitudes'
+        nc_fh['rainfall_amount'].coordinates = 'longitudes latitudes'
         nc_fh['rainfall_amount'].grid_mapping = 'RADOLAN_grid'
 
         # global attributes
@@ -335,8 +335,8 @@ def create_empty_netcdf(fn):
         nc_fh['radolan_grid'].semi_major_axis = 6370040.0
         nc_fh['radolan_grid'].false_easting = 0.0
         nc_fh['radolan_grid'].false_northing = 0.0
-        nc_fh['radolan_grid'].standard_parallel = 10
-        nc_fh['radolan_grid'].straight_vertical_longitude_from_pole = 30
+        nc_fh['radolan_grid'].scale_factor_at_projection_origin = 0.9330127019
+        nc_fh['radolan_grid'].straight_vertical_longitude_from_pole = 10.0
         nc_fh['radolan_grid'].latitude_of_projection_origin = 90.0
 
     return None
