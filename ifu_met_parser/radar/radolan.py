@@ -365,15 +365,16 @@ def append_to_netcdf(fn, data_list, metadata_list):
 def append_to_yearly_netcdf(netcdf_file_dir,
                             data_list,
                             metadata_list):
-    for data, metadata in zip(data_list, metadata_list):
+    for i, (data, metadata) in enumerate(zip(data_list, metadata_list)):
         netcdf_fn = datetime.strftime(metadata['datetime'],
                                       filename_timestamp_format['netcdf'])
         netcdf_fn_full_path = os.path.join(netcdf_file_dir, netcdf_fn)
         if not os.path.isfile(netcdf_fn_full_path):
             print('Creating new file %s' % netcdf_fn_full_path)
             create_empty_netcdf(netcdf_fn_full_path)
-        # print('Appending to %s for t=%s' % (netcdf_fn_full_path,
-        #                                    str(metadata['datetime'])))
+        else:
+            if i == 0:
+                print('Appending to %s' % netcdf_fn_full_path)
         append_to_netcdf(netcdf_fn_full_path, data, metadata)
 
     return
@@ -429,12 +430,15 @@ def read_in_files_and_append_to_yearly_netcdf(fn_list,
         data_list_temp, metadata_list_temp = read_in_files(
                                                 [fn, ],
                                                 print_filenames=print_filenames)
-        data_list += data_list_temp
-        metadata_list += metadata_list_temp
+        #data_list.extend(data_list_temp)
+        #metadata_list.extend(metadata_list_temp)
 
-    append_to_yearly_netcdf(netcdf_file_dir,
-                            data_list,
-                            metadata_list)
+        append_to_yearly_netcdf(netcdf_file_dir,
+                                data_list_temp,
+                                metadata_list_temp)
+
+        data_list_temp = None
+        metadata_list_temp = None
 
 
 def read_in_files_chunked_and_append_to_yearly_netcdf(fn_list,
