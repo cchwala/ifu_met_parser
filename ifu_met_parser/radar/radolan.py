@@ -314,7 +314,7 @@ def create_empty_netcdf(fn):
 
         nc_fh['rainfall_amount'].long_name = 'Hourly rainfall'
         nc_fh['rainfall_amount'].standard_name = 'rainfall_amount'
-        nc_fh['rainfall_amount'].units = 'kg s-1'
+        nc_fh['rainfall_amount'].units = 'kg m-2'
         nc_fh['rainfall_amount'].coordinates = 'longitudes latitudes'
         nc_fh['rainfall_amount'].grid_mapping = 'RADOLAN_grid'
 
