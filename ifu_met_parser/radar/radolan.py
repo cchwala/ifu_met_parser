@@ -82,8 +82,13 @@ def download_files_from_ftp(t_start, t_stop, local_data_dir, redownload_existing
     fn_list_recent = ftp_session.nlst()
     fn_list_recent.sort()
 
+    fn_list_recent_cleaned = []
+    for fn in fn_list_recent:
+        if 'dwd---bin.gz' in fn:
+            fn_list_recent_cleaned.append(fn)
+
     # check if we need to look for `recent` and/or `historic` files
-    t_recent_min = datetime.strptime(fn_list_recent[0],
+    t_recent_min = datetime.strptime(fn_list_recent_cleaned[0],
                                      filename_timestamp_format['radolan_recent'])
     if t_start < t_recent_min:
         need_to_download_historic_files = True
