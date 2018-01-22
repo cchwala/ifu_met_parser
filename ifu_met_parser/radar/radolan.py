@@ -475,9 +475,14 @@ def read_in_files_chunked_and_append_to_yearly_netcdf(fn_list,
 
 def get_last_time_stamp_from_netcdfs(netcdf_file_dir, fn_pattern='RADOLAN_*.nc'):
     fn_list = glob.glob(os.path.join(netcdf_file_dir, fn_pattern))
-    ds = xr.open_mfdataset(fn_list)
-    ts_max = ds.time[:].values.max()
-    ds.close()
+    if len(fn_list) > 0:
+        ds = xr.open_mfdataset(fn_list)
+        ts_max = ds.time[:].values.max()
+        ds.close()
+    else:
+        # If no NetCDFs exist, start with first RADOLAN data somewhere in 2006
+        ts_max = pd.np.datetime64('2006-01-01', 'ns')
+
     return ts_max
 
 
