@@ -359,12 +359,16 @@ def append_to_netcdf(fn, data_list, metadata_list):
         current_length = len(nc_fh['time'][:])
         for i, (data, metadata) in enumerate(zip(data_list, metadata_list)):
             i_new = i + current_length
-            nc_fh['time'][i_new] = netCDF4.date2num(metadata['datetime'],
-                                                    units=nc_fh['time'].units,
-                                                    calendar=nc_fh['time'].calendar)
-            temp_data = data.copy()
-            temp_data[np.isnan(temp_data)] = NETCDF_FILL_VALUE_FLOAT
-            nc_fh['rainfall_amount'][i_new, :, :] = temp_data
+            t_new = netCDF4.date2num(metadata['datetime'],
+                                     units=nc_fh['time'].units,
+                                     calendar=nc_fh['time'].calendar)
+            if t_new not in nc_fh['time'][:]:
+                nc_fh['time'][i_new] = t_new
+                temp_data = data.copy()
+                temp_data[np.isnan(temp_data)] = NETCDF_FILL_VALUE_FLOAT
+                nc_fh['rainfall_amount'][i_new, :, :] = temp_data
+            else:
+                print('Data for %s is already in %s' % (t_new, fn))
 
 
 def append_to_yearly_netcdf(netcdf_file_dir,
@@ -415,7 +419,7 @@ def create_yearly_netcdfs(raw_data_dir,
     # divided into chunks within the function to avoid that too
     # the data that has to be temporarily stored in memory gets
     # to large.
-    chunk_length = 200
+    chunk_length = 100
     read_in_files_chunked_and_append_to_yearly_netcdf(fn_list_recent,
                                                       chunk_length,
                                                       netcdf_file_dir,
@@ -480,8 +484,8 @@ def get_last_time_stamp_from_netcdfs(netcdf_file_dir, fn_pattern='RADOLAN_*.nc')
         ts_max = ds.time[:].values.max()
         ds.close()
     else:
-        # If no NetCDFs exist, start with first RADOLAN data somewhere in 2006
-        ts_max = pd.np.datetime64('2006-01-01', 'ns')
+        # If no NetCDFs exist, start with first RADOLAN data from summer 2005
+        ts_max = pd.np.datetime64('2005-06-01', 'ns')
 
     return ts_max
 
@@ -538,7 +542,7 @@ def update_recent_netcdf(local_data_dir, netcdf_file_dir, N_retries=10, wait_sec
     # divided into chunks within the function to avoid that too
     # the data that has to be temporarily stored in memory gets
     # to large.
-    chunk_length = 200
+    chunk_length = 100
     read_in_files_chunked_and_append_to_yearly_netcdf(fn_list_recent,
                                                       chunk_length,
                                                       netcdf_file_dir,
