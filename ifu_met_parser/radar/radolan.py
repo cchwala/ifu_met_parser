@@ -298,7 +298,7 @@ def create_empty_netcdf(fn):
         # variable attributes
         nc_fh['time'].long_name = 'Time'
         nc_fh['time'].standard_name = 'time'
-        nc_fh['time'].units = 'hours since 2000-01-01 00:50:00.0'
+        nc_fh['time'].units = 'hours since 2000-01-01 00:50:00'
         nc_fh['time'].calendar = 'standard'
 
         nc_fh['x'].long_name = 'RADOLAN Grid x coordinate of projection'
