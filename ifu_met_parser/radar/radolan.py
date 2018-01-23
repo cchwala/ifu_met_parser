@@ -177,33 +177,39 @@ def read_in_one_bin_file(f):
 
 
 def read_in_one_tar_gz_file(fn, print_filenames=False):
-    data_list = []
-    metadata_list = []
+    import dask.delayed
+    import dask.diagnostics
+
+    def read_from_file_handle(f_handle):
+        data, metadata = read_in_one_bin_file(f_handle)
+        data = _clean_radolan_data(data, metadata)
+        return data, metadata
+
+    read_from_file_handle_delayed = dask.delayed(read_from_file_handle)
+
     # Unzip and untar RADOLAN-bin files and read them in
     with tarfile.open(fn, "r:gz") as tar:
+        f_list = []
         for member in tar.getmembers():
             f = tar.extractfile(member)
             if f is not None:
                 if print_filenames:
-                    print('  Reading in %s' % f.name)
-                # Unfortunately, the old "historic" files till somewhere
-                # in 2014 contain gzipped "bin" files. And since the
-                # extraction from the tar-archive returns file handles,
-                # assuming that they belong to plain files, the handles
-                # have to be converted into GzipFile-handles.
-                # Note, that the wradlib parsing function could handle zipped
-                # and plain files, but only when file names are provided
-                try:
-                    if '.gz' in f.name:
-                        with gzip.GzipFile(fileobj=f, mode='rb') as f:
-                            data, metadata = read_in_one_bin_file(f)
-                    else:
-                        data, metadata = read_in_one_bin_file(f)
-                    data = _clean_radolan_data(data, metadata)
-                    data_list.append(data)
-                    metadata_list.append(metadata)
-                except:
-                    print('  !!!!!!!! Could not read in file %s !!!!!!!!!!!' % fn)
+                    print('  Generate file handle from %s' % f.name)
+                if '.gz' in f.name:
+                    f_list.append(gzip.GzipFile(fileobj=f, mode='rb'))
+                else:
+                    f_list.append(f)
+
+        print('  Generating delayed readings of files...')
+        delayed_results = [read_from_file_handle_delayed(f_i)
+                           for f_i in f_list]
+
+        print '  Computing delayed reading of files...'
+        with dask.diagnostics.ProgressBar():
+            results_list = dask.compute(*delayed_results)
+
+    data_list = [i[0] for i in results_list]
+    metadata_list = [i[1] for i in results_list]
 
     # Sort by datetime
     data_list_sorted, metadata_list_sorted = _sort_by_datetime(data_list,
