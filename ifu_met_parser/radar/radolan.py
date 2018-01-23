@@ -179,34 +179,38 @@ def read_in_one_bin_file(f):
 def read_in_one_tar_gz_file(fn, print_filenames=False):
     import dask.delayed
     import dask.diagnostics
+    import dask.multiprocessing
 
-    def read_from_file_handle(f_handle):
-        data, metadata = read_in_one_bin_file(f_handle)
-        data = _clean_radolan_data(data, metadata)
-        return data, metadata
-
-    read_from_file_handle_delayed = dask.delayed(read_from_file_handle)
-
-    # Unzip and untar RADOLAN-bin files and read them in
-    with tarfile.open(fn, "r:gz") as tar:
-        f_list = []
-        for member in tar.getmembers():
-            f = tar.extractfile(member)
-            if f is not None:
-                if print_filenames:
-                    print('  Generate file handle from %s' % f.name)
-                if '.gz' in f.name:
-                    f_list.append(gzip.GzipFile(fileobj=f, mode='rb'))
+    @dask.delayed()
+    def read_tar_file_member_delayed(tar_fn, tar_member_name):
+        print tar_member_name
+        try:
+            with tarfile.open(tar_fn, "r:gz") as tar_file_handle:
+                tar_member = tar_file_handle.getmember(tar_member_name)
+                f_handle = tar_file_handle.extractfile(tar_member)
+                if '.gz' in f_handle.name:
+                    with gzip.GzipFile(fileobj=f_handle, mode='rb') as f_handle_zip:
+                        data, metadata = read_in_one_bin_file(f_handle_zip)
+                        data = _clean_radolan_data(data, metadata)
                 else:
-                    f_list.append(f)
+                    data, metadata = read_in_one_bin_file(f_handle)
 
-        print('  Generating delayed readings of files...')
-        delayed_results = [read_from_file_handle_delayed(f_i)
-                           for f_i in f_list]
+                return data, metadata
+        except:
+            print(' !!! Parsing file %s failed !!!' % tar_member_name)
 
-        print '  Computing delayed reading of files...'
-        with dask.diagnostics.ProgressBar():
-            results_list = dask.compute(*delayed_results)
+    # Get names of RADOLAN-bin files in tar file
+    with tarfile.open(fn, "r:gz") as tar:
+        tar_file_member_names = [member.name for member in tar.getmembers()]
+
+    print('  Generating delayed readings of files...')
+    delayed_results = [read_tar_file_member_delayed(fn, member_name)
+                       for member_name in tar_file_member_names]
+
+    print '  Computing delayed reading of files...'
+    with dask.diagnostics.ProgressBar():
+        results_list = dask.compute(*delayed_results,
+                                    get=dask.multiprocessing.get)
 
     data_list = [i[0] for i in results_list]
     metadata_list = [i[1] for i in results_list]
