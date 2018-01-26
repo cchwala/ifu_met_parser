@@ -492,8 +492,14 @@ def get_last_time_stamp_from_netcdfs(netcdf_file_dir, fn_pattern='RADOLAN_*.nc')
 
 def download_latest_files_from_ftp(local_data_dir, netcdf_file_dir):
     netcdf_ts_last = get_last_time_stamp_from_netcdfs(netcdf_file_dir)
-    fn_list = download_files_from_ftp(t_start=netcdf_ts_last + np.timedelta64(1, 'h'),
-                                      t_stop=datetime.utcnow(),
+    # Timestamp for next file should be one hour after the last file
+    t_start = (netcdf_ts_last + np.timedelta64(1, 'h'))
+    # Last file to download should be one hour back in time since RADOLAN
+    # files become available approx. at UTC + 1 hour and 16 minutes.
+    # With a cron job scheduled every hour + 20 minutes, this works fine.
+    t_stop = (datetime.utcnow() - pd.Timedelta('1h'))
+    fn_list = download_files_from_ftp(t_start=t_start,
+                                      t_stop=t_stop,
                                       local_data_dir=local_data_dir,
                                       redownload_existing_files=False)
     return fn_list
