@@ -172,7 +172,7 @@ def _download_one_file(ftp_session, fn_remote, fn_local):
 ########################################
 
 def read_in_one_bin_file(f):
-    data, metadata = wrl.io.read_RADOLAN_composite(f)
+    data, metadata = wrl.io.read_radolan_composite(f)
     return data, metadata
 
 
@@ -236,7 +236,8 @@ def read_in_files(fn_list, print_filenames=False):
                 data = _clean_radolan_data(data, metadata)
                 data_list.append(data)
                 metadata_list.append(metadata)
-            except:
+            except Exception as e:
+                print(str(e))
                 print('  !!!!!!!! Could not read in file %s !!!!!!!!!!!' % fn)
 
     # ds = radolan_to_xarray_dataset(data_list, metadata_list)
