@@ -24,9 +24,9 @@ import netCDF4
 import wradlib as wrl
 
 
-ftp_server = 'ftp-cdc.dwd.de'
-data_dir_recent = '/pub/CDC/grids_germany/hourly/radolan/recent/bin'
-data_dir_historic = '/pub/CDC/grids_germany/hourly/radolan/historical/bin'
+ftp_server = 'opendata.dwd.de'
+data_dir_recent = '/climate_environment/CDC/grids_germany/hourly/radolan/recent/bin/'
+data_dir_historic = '/climate_environment/CDC/grids_germany/hourly/radolan/historical/bin/'
 
 # prefix and postfix RADOLAN files
 filename_timestamp_format = {'radolan_recent': 'raa01-rw_10000-%y%m%d%H%M-dwd---bin.gz',
