@@ -14,6 +14,7 @@ import os
 import tarfile
 import gzip
 import glob
+import pkg_resources
 from datetime import datetime, timedelta
 from time import sleep
 
@@ -273,9 +274,11 @@ def create_empty_netcdf(fn):
         radolan_xy_grids = wrl.georef.get_radolan_grid(900, 900)
         radolan_x = radolan_xy_grids[0, :, 0]
         radolan_y = radolan_xy_grids[:, 0, 1]
-        radolan_lat_lon_grids = wrl.georef.get_radolan_grid(900, 900, wgs84=True)
-        radolan_lons = radolan_lat_lon_grids[:, :, 0]
-        radolan_lats = radolan_lat_lon_grids[:, :, 1]
+
+        filepath = pkg_resources.resource_filename(__name__, 'radolan_coordinates.nc')
+        ds_coords = xr.open_dataset(filepath)
+        radolan_lons = ds_coords.longitudes.values
+        radolan_lats = ds_coords.latitudes.values
 
         # create dimensions
         nc_fh.createDimension('x', 900)
